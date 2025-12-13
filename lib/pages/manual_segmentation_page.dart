@@ -1,9 +1,12 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'dart:ui' as ui;
@@ -422,6 +425,16 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadTemplates();
+    // Pastikan template default tersedia dan langsung dimuat ke editor
+    Future.microtask(() async {
+      try {
+        final existing = await ShapeDatabase.instance.getTemplate('default');
+        if (existing == null) {
+          await DatabaseHelper.insertDefaultTemplate();
+        }
+        await _loadTemplate('default');
+      } catch (_) {}
+    });
   }
 
   @override
@@ -433,9 +446,10 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
   Future<void> _loadTemplates() async {
     setState(() => _isLoading = true);
     try {
-      final templates = await ShapeDatabase.instance.getAllTemplates();
+      // Hanya muat template 'default'
+      final t = await ShapeDatabase.instance.getTemplate('default');
       setState(() {
-        _templates = templates;
+        _templates = t != null ? [t] : [];
         _isLoading = false;
       });
     } catch (e) {
@@ -937,10 +951,20 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
               tooltip: 'Simpan Data',
             ),
             IconButton(
-              icon: const Icon(Icons.image),
-              onPressed: _pickImage,
-              tooltip: 'Pilih Gambar',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _selectedShapeIndex != null ? _deleteSelectedShape : null,
+              tooltip: 'Hapus Shape Terpilih',
             ),
+            // IconButton(
+            //   icon: const Icon(Icons.layers),
+            //   onPressed: () => _loadTemplate('default'),
+            //   tooltip: 'Muat Template Default',
+            // ),
+            // IconButton(
+            //   icon: const Icon(Icons.image),
+            //   onPressed: _pickImage,
+            //   tooltip: 'Pilih Gambar',
+            // ),
           ],
         ],
       ),
@@ -952,17 +976,21 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
           _buildEditorView(),
         ],
       ),
-      floatingActionButton: _tabController.index == 0
-          ? FloatingActionButton.extended(
-              onPressed: () {
-                _tabController.animateTo(1);
-                _pickImage();
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Template Baru'),
-            )
-          : null,
+      // floatingActionButton dihapus
     );
+  }
+
+  void _deleteSelectedShape() {
+    if (_selectedShapeIndex == null) return;
+    final removed = _shapes.removeAt(_selectedShapeIndex!);
+    _redoStack.add(removed); // simpan di redoStack agar dapat dikembalikan jika perlu
+    _selectedShapeIndex = null;
+    setState(() {});
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Shape terpilih dihapus')),
+      );
+    }
   }
 
   Widget _buildTemplateGridView() {
@@ -1045,9 +1073,9 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 ),
-                child: File(template.imagePath).existsSync()
-                    ? Image.file(
-                        File(template.imagePath),
+                child: template.imagePath.startsWith('assets/')
+                    ? Image.asset(
+                        template.imagePath,
                         fit: BoxFit.cover,
                         errorBuilder: (context, error, stackTrace) {
                           return const Center(
@@ -1055,9 +1083,29 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
                           );
                         },
                       )
-                    : const Center(
-                        child: Icon(Icons.image_not_supported, size: 48),
-                      ),
+                    : (template.imagePath.startsWith('data:image')
+                        ? Image.memory(
+                            base64Decode(template.imagePath.split(',').last),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Center(
+                                child: Icon(Icons.broken_image, size: 48),
+                              );
+                            },
+                          )
+                        : (File(template.imagePath).existsSync()
+                            ? Image.file(
+                                File(template.imagePath),
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return const Center(
+                                    child: Icon(Icons.broken_image, size: 48),
+                                  );
+                                },
+                              )
+                            : const Center(
+                                child: Icon(Icons.image_not_supported, size: 48),
+                              ))),
               ),
             ),
             Expanded(
@@ -1101,17 +1149,11 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
                     ),
                     const Spacer(),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, size: 20),
-                          onPressed: () => _editTemplate(template),
-                          tooltip: 'Edit',
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, size: 20),
-                          onPressed: () => _deleteTemplate(template),
-                          tooltip: 'Delete',
+                        TextButton.icon(
+                          onPressed: () => _changeTemplateImage(template),
+                          icon: const Icon(Icons.image),
+                          label: const Text('Ubah Gambar'),
                         ),
                       ],
                     ),
@@ -1123,6 +1165,118 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
         ),
       ),
     );
+  }
+
+  Future<void> _changeTemplateImage(Template template) async {
+    try {
+      final xfile = await _picker.pickImage(source: ImageSource.gallery);
+      if (xfile == null) return;
+
+      // Baca bytes gambar yang dipilih
+      Uint8List bytes;
+      File? pickedFile;
+      if (kIsWeb) {
+        bytes = await xfile.readAsBytes();
+      } else {
+        pickedFile = File(xfile.path);
+        bytes = await pickedFile.readAsBytes();
+      }
+
+      // Decode untuk mendapatkan ukuran gambar baru
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final newW = frame.image.width.toDouble();
+      final newH = frame.image.height.toDouble();
+      frame.image.dispose();
+
+      // Tentukan lokasi/path penyimpanan sesuai platform
+      String savedImagePath;
+      if (kIsWeb) {
+        // Di web, gunakan Data URI base64 agar bisa dirender tanpa File IO
+        final dotIndex = xfile.name.lastIndexOf('.');
+        final ext = dotIndex != -1 ? xfile.name.substring(dotIndex + 1).toLowerCase() : 'png';
+        final mime = (ext == 'png') ? 'image/png' : 'image/jpeg';
+        final b64 = base64Encode(bytes);
+        savedImagePath = 'data:$mime;base64,$b64';
+      } else {
+        // Simpan ke folder aplikasi (mobile/desktop)
+        final appDir = await getApplicationDocumentsDirectory();
+        final templatesDir = Directory('${appDir.path}/templates');
+        if (!await templatesDir.exists()) {
+          await templatesDir.create(recursive: true);
+        }
+        final dotIndex = xfile.path.lastIndexOf('.');
+        final ext = dotIndex != -1 ? xfile.path.substring(dotIndex) : '.jpg';
+        savedImagePath = '${templatesDir.path}/${template.name}$ext';
+        final destFile = File(savedImagePath);
+        if (await destFile.exists()) {
+          await destFile.delete();
+        }
+        await destFile.writeAsBytes(bytes, flush: true);
+      }
+
+      // Update template
+      final updatedTemplate = Template(
+        name: template.name,
+        imagePath: savedImagePath,
+        createdAt: template.createdAt,
+        shapeCount: template.shapeCount,
+        description: template.description,
+      );
+      await ShapeDatabase.instance.updateTemplate(updatedTemplate);
+
+      // Ambil shapes lama, skala sesuai ukuran baru, lalu replace di DB
+      final oldShapes = await ShapeDatabase.instance.getShapes(templateName: template.name);
+      await ShapeDatabase.instance.deleteShapes(templateName: template.name);
+
+      for (final s in oldShapes) {
+        final scaleX = newW / s.imageWidth;
+        final scaleY = newH / s.imageHeight;
+
+        final updatedShape = SegShape(
+          templateName: s.templateName,
+          shapeType: s.shapeType,
+          x: s.x * scaleX,
+          y: s.y * scaleY,
+          width: s.width * scaleX,
+          height: s.height * scaleY,
+          radiusX: s.radiusX != null ? s.radiusX! * scaleX : null,
+          radiusY: s.radiusY != null ? s.radiusY! * scaleY : null,
+          rotation: s.rotation,
+          imageWidth: newW,
+          imageHeight: newH,
+          imagePath: savedImagePath,
+        );
+
+        await ShapeDatabase.instance.insertShape(updatedShape);
+      }
+
+      await _loadTemplates();
+
+      // Jika template yang diubah sedang aktif di editor, muat ulang agar gambar baru tampil
+      if (_currentTemplateName == template.name) {
+        // Clear image cache untuk file lama agar gambar baru tampil
+        if (!kIsWeb && pickedFile != null) {
+          final FileImage fileImage = FileImage(File(savedImagePath));
+          await fileImage.evict();
+        }
+
+        // Load ulang template dengan gambar baru
+        await _loadTemplate(template.name);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gambar template berhasil diubah')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal mengubah gambar: $e')),
+        );
+      }
+    }
   }
 
   Widget _buildEditorView() {
@@ -1183,7 +1337,9 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
                   height: displayH,
                   child: Image.file(
                     _imageFile!,
+                    key: ValueKey(_imageFile!.path), // Force rebuild saat path berubah
                     fit: BoxFit.fill,
+                    gaplessPlayback: false, // Disable cache untuk memuat gambar baru
                   ),
                 ),
                 // render shapes
@@ -1330,6 +1486,49 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
                                             fontWeight: _interactionMode == 'resize' 
                                                 ? FontWeight.bold 
                                                 : FontWeight.normal,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.2),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: _deleteSelectedShape,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: const [
+                                        Icon(
+                                          Icons.delete_outline,
+                                          size: 16,
+                                          color: Colors.red,
+                                        ),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Hapus',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.red,
+                                            fontWeight: FontWeight.bold,
                                           ),
                                         ),
                                       ],
@@ -1549,6 +1748,7 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
                       ),
                     ),
                   ),
+              
               ],
             ),
           );
@@ -1675,10 +1875,12 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
 
     if (confirmed == true) {
       try {
-        // Delete image file
-        final imageFile = File(template.imagePath);
-        if (await imageFile.exists()) {
-          await imageFile.delete();
+        // Delete image file only if it's not an asset path
+        if (!template.imagePath.startsWith('assets/')) {
+          final imageFile = File(template.imagePath);
+          if (await imageFile.exists()) {
+            await imageFile.delete();
+          }
         }
 
         await ShapeDatabase.instance.deleteTemplate(template.name);
@@ -1710,27 +1912,68 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
         }
         return;
       }
-
-      final imagePath = shapes.first.imagePath;
-      final imageFile = File(imagePath);
-      if (!await imageFile.exists()) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('File gambar tidak ditemukan')),
-          );
+      // Ambil imagePath dari tabel templates jika tersedia, fallback ke shapes
+      String imagePath;
+      try {
+        final tpl = await ShapeDatabase.instance.getTemplate(templateName);
+        if (tpl != null && tpl.imagePath.isNotEmpty) {
+          imagePath = tpl.imagePath;
+        } else {
+          imagePath = shapes.first.imagePath;
         }
-        return;
+      } catch (_) {
+        imagePath = shapes.first.imagePath;
+      }
+      Uint8List bytes;
+      File? imageFile;
+
+      if (imagePath.startsWith('assets/')) {
+        // Muat dari assets dan salin ke storage aplikasi agar editor dapat memakai File
+        final ByteData data = await rootBundle.load(imagePath);
+        bytes = data.buffer.asUint8List();
+
+        final appDir = await getApplicationDocumentsDirectory();
+        final templatesDir = Directory('${appDir.path}/templates');
+        if (!await templatesDir.exists()) {
+          await templatesDir.create(recursive: true);
+        }
+        final savedImagePath = '${templatesDir.path}/$templateName.png';
+        imageFile = File(savedImagePath);
+        await imageFile.writeAsBytes(bytes, flush: true);
+      } else if (imagePath.startsWith('data:image')) {
+        // Muat dari data URI base64 (khusus web)
+        final b64 = imagePath.split(',').last;
+        bytes = base64Decode(b64);
+        imageFile = null; // Tidak ada File fisik di web
+      } else {
+        imageFile = File(imagePath);
+        if (!await imageFile.exists()) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('File gambar tidak ditemukan')),
+            );
+          }
+          return;
+        }
+        // Evict cache untuk memastikan gambar terbaru dimuat
+        final FileImage fileImage = FileImage(imageFile);
+        await fileImage.evict();
+        bytes = await imageFile.readAsBytes();
       }
 
-      // Load image and set state
-      final bytes = await imageFile.readAsBytes();
+      // Decode dan set state
       ui.decodeImageFromList(bytes, (ui.Image decoded) {
         if (!mounted) {
           decoded.dispose();
           return;
         }
         setState(() {
-          _imageFile = imageFile;
+          // Di web, imageFile bisa null; editor tetap bekerja dengan bytes/size
+          if (imageFile != null) {
+            _imageFile = imageFile;
+          } else {
+            _imageFile = null;
+          }
           _imageSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
           _shapes
             ..clear()
@@ -1743,8 +1986,8 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
           _offsetY = 0.0;
         });
         decoded.dispose();
-        
-        // Switch to editor tab
+
+        // Pindah ke tab editor
         _tabController.animateTo(1);
       });
 
@@ -1781,37 +2024,8 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pilih gambar terlebih dahulu')));
       return;
     }
-    final controller = TextEditingController(text: _currentTemplateName);
-    final title = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Masukkan Judul Template'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Judul',
-              hintText: 'Contoh: Frame A',
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
-            ElevatedButton(
-              onPressed: () {
-                final t = controller.text.trim();
-                Navigator.pop(context, t.isEmpty ? null : t);
-              },
-              child: const Text('Simpan'),
-            ),
-          ],
-        );
-      },
-    );
-    if (!mounted) return;
-    if (title == null || title.isEmpty) {
-      return;
-    }
+    // Paksa menggunakan nama template 'default'
+    const title = 'default';
     _currentTemplateName = title;
 
     // Salin gambar ke penyimpanan aplikasi agar template menyimpan gambarnya juga
@@ -1823,20 +2037,32 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
     final origPath = _imageFile!.path;
     final dotIndex = origPath.lastIndexOf('.');
     final ext = dotIndex != -1 ? origPath.substring(dotIndex) : '.jpg';
-    final safeTitle = title.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    const safeTitle = 'default';
     final savedImagePath = '${templatesDir.path}/$safeTitle$ext';
     final destFile = File(savedImagePath);
-    if (await destFile.exists()) {
-      await destFile.delete();
+    // Jika path sumber sama dengan path tujuan, jangan hapus/copy (hindari menghapus sumber)
+    if (origPath != savedImagePath) {
+      if (await destFile.exists()) {
+        await destFile.delete();
+      }
+      try {
+        await _imageFile!.copy(savedImagePath);
+      } catch (_) {
+        // Fallback: tulis bytes secara manual jika copy gagal
+        final bytes = await _imageFile!.readAsBytes();
+        await destFile.writeAsBytes(bytes, flush: true);
+      }
     }
-    await _imageFile!.copy(savedImagePath);
 
     // Save template to database
+    // Update template default jika sudah ada, jika belum insert
+    final existing = await ShapeDatabase.instance.getTemplate(title);
     final template = Template(
       name: title,
       imagePath: savedImagePath,
-      createdAt: DateTime.now(),
+      createdAt: existing?.createdAt ?? DateTime.now(),
       shapeCount: _shapes.length,
+      description: existing?.description,
     );
     
     // Log data template yang akan disimpan
@@ -1847,10 +2073,15 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
     developer.log('Shape Count: ${template.shapeCount}', name: 'ManualSegmentationPage');
     developer.log('Template Map: ${template.toMap()}', name: 'ManualSegmentationPage');
     
-    await ShapeDatabase.instance.insertTemplate(template);
+    if (existing == null) {
+      await ShapeDatabase.instance.insertTemplate(template);
+    } else {
+      await ShapeDatabase.instance.updateTemplate(template);
+    }
 
     // Hapus data lama untuk template + gambar tersalin
-    await ShapeDatabase.instance.deleteShapes(imagePath: savedImagePath, templateName: title);
+    // Hapus semua shapes lama untuk template 'default'
+    await ShapeDatabase.instance.deleteShapes(templateName: title);
     
     developer.log('=== SAVING SHAPES DATA ===', name: 'ManualSegmentationPage');
     developer.log('Total shapes to save: ${_shapes.length}', name: 'ManualSegmentationPage');
@@ -1891,7 +2122,7 @@ class _ManualSegmentationPageState extends State<ManualSegmentationPage> with Ti
     await _loadTemplates();
     
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Data dan gambar disimpan untuk "$title"')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Data dan gambar disimpan untuk "default"')));
   }
 
   void _showCreateNewShapeNotification() {

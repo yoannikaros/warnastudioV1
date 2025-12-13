@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
@@ -652,7 +654,7 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
         // Orange blob - KIRI ATAS (setengah keluar pinggir)
         Positioned(
           left: -size.width * 0.35, // Setengah ke kiri pinggir
-          top: -size.height * -0.2,  // Setengah ke atas pinggir
+          top: -size.height * 0.2,  // Setengah ke atas pinggir
           child: Container(
             width: size.width * 0.7,
             height: size.height * 0.8,
@@ -721,11 +723,13 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
           ),
         ),
         
-        // Blur effect
-        BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 60.0, sigmaY: 60.0),
-          child: Container(
-            color: Colors.transparent,
+        // Blur effect (dibatasi agar tidak bocor ke tepi layar web)
+        ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 60.0, sigmaY: 60.0),
+            child: Container(
+              color: Colors.transparent,
+            ),
           ),
         ),
       ],
@@ -751,6 +755,19 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
           Row(children: [Image.asset('assets/images/logo.png', width: 100)]),
 
           const Spacer(),
+
+          // Manage button (top-right)
+          TextButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ManualSegmentationPage(),
+                ),
+              );
+            },
+            child: const Text('Manage'),
+          ),
 
           // Navigation Menu
           // Row(
@@ -826,9 +843,10 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
             padding: const EdgeInsets.all(40),
             child: Center(
               child: Container(
-                width: 600, // Diperbesar dari 400 ke 500
+                width: 550 * (4 / 5), // Sesuaikan lebar dengan rasio template 4:5
                 height: 550, // Diperbesar dari 300 ke 400
                 decoration: BoxDecoration(
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
@@ -1117,6 +1135,7 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
             aspectRatio: 4 / 5, // Rasio 4:5 untuk template yang lebih besar
             child: Container(
               decoration: BoxDecoration(
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: const Color(0xFFE0E0E0), width: 1),
               ),

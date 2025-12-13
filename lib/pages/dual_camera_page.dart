@@ -5,6 +5,8 @@ import 'dart:io';
 import 'dart:ui';
 import 'dart:async';
 import 'camera_template_reverse_page.dart';
+import 'dart:convert';
+import 'manual_segmentation_page.dart';
 
 class DualCameraPage extends StatefulWidget {
   const DualCameraPage({super.key});
@@ -20,6 +22,12 @@ class _DualCameraPageState extends State<DualCameraPage> with TickerProviderStat
   CameraController? _cameraController2;
   List<CameraDescription>? _cameras;
   bool _isCameraInitialized2 = false;
+  
+  // Template overlay state
+  String _templateName = 'default';
+  Template? _templateData;
+  List<SegShape> _templateShapes = [];
+  bool _isTemplateLoaded = false;
   
   // Countdown variables
   Timer? _countdownTimer;
@@ -51,6 +59,7 @@ class _DualCameraPageState extends State<DualCameraPage> with TickerProviderStat
     ));
     
     _initializeCameras();
+    _loadTemplateOverlay();
   }
 
   Future<void> _initializeCameras() async {
@@ -192,6 +201,27 @@ class _DualCameraPageState extends State<DualCameraPage> with TickerProviderStat
     }
   }
 
+  Future<void> _loadTemplateOverlay() async {
+    try {
+      final tpl = await ShapeDatabase.instance.getTemplate(_templateName);
+      final shapes = await ShapeDatabase.instance.getShapes(templateName: _templateName);
+      if (mounted) {
+        setState(() {
+          _templateData = tpl;
+          _templateShapes = shapes;
+          _isTemplateLoaded = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('DualCameraPage: Error loading template overlay: $e');
+      if (mounted) {
+        setState(() {
+          _isTemplateLoaded = false;
+        });
+      }
+    }
+  }
+
   Future<void> _disposeControllers() async {
     if (_isDisposing) {
       debugPrint('DualCameraPage: Already disposing controllers, skipping');
@@ -265,6 +295,8 @@ class _DualCameraPageState extends State<DualCameraPage> with TickerProviderStat
       debugPrint('DualCameraPage: App resumed, checking camera state');
       if (!_isDisposing) {
         _checkAndReinitializeCameras();
+        // Refresh template overlay in case it was updated elsewhere
+        _loadTemplateOverlay();
       }
     } else if (state == AppLifecycleState.detached) {
       // App is being terminated, force dispose cameras
@@ -468,7 +500,7 @@ class _DualCameraPageState extends State<DualCameraPage> with TickerProviderStat
         // Orange blob - KIRI ATAS (setengah keluar pinggir)
         Positioned(
           left: -size.width * 0.35, // Setengah ke kiri pinggir
-          top: -size.height * -0.2,  // Setengah ke atas pinggir
+          top: -size.height * 0.2,  // Setengah ke atas pinggir
           child: Container(
             width: size.width * 0.7,
             height: size.height * 0.8,
@@ -537,11 +569,13 @@ class _DualCameraPageState extends State<DualCameraPage> with TickerProviderStat
           ),
         ),
         
-        // Blur effect
-        BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 60.0, sigmaY: 60.0),
-          child: Container(
-            color: Colors.transparent,
+        // Blur effect (dibatasi agar tidak bocor ke tepi layar web)
+        ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 60.0, sigmaY: 60.0),
+            child: Container(
+              color: Colors.transparent,
+            ),
           ),
         ),
       ],
@@ -875,7 +909,7 @@ class _DualCameraPageState extends State<DualCameraPage> with TickerProviderStat
             // Template with Camera 2 Preview
             Container(
               width: 300,
-              height: 450, // Adjusted height to match template aspect ratio
+              height: 450, // Rasio 4:5 untuk template
               margin: const EdgeInsets.only(bottom: 30),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
@@ -892,30 +926,65 @@ class _DualCameraPageState extends State<DualCameraPage> with TickerProviderStat
                 child: Stack(
                   children: [
                     // Camera 2 positioned within template shape (behind template)
-                    Positioned(
-                      // Calculate position based on template coordinates
-                      // Original template: 945x1417, shape: x=41.125, y=242.125, w=890.75, h=950.25
-                      // Container: 300x450
-                      left: (41.125 / 945.0) * 300, // ~13.1
-                      top: (242.125 / 1417.0) * 450, // ~76.8
-                      width: (890.75 / 945.0) * 300, // ~282.6
-                      height: (950.25 / 1417.0) * 450, // ~301.4
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: _buildCameraPreviewCropped(
-                          _cameraController2,
-                          _isCameraInitialized2,
-                          '',
+                    Builder(builder: (context) {
+                      const double containerW = 300.0;
+                      const double containerH = 450.0;
+                      double left = (41.125 / 945.0) * containerW;
+                      double top = (242.125 / 1417.0) * containerH;
+                      double width = (890.75 / 945.0) * containerW;
+                      double height = (950.25 / 1417.0) * containerH;
+
+                      if (_templateShapes.isNotEmpty) {
+                        final s = _templateShapes.first;
+                        left = s.normalizedX * containerW;
+                        top = s.normalizedY * containerH;
+                        width = s.normalizedWidth * containerW;
+                        height = s.normalizedHeight * containerH;
+                      }
+
+                      return Positioned(
+                        left: left,
+                        top: top,
+                        width: width,
+                        height: height,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: _buildCameraPreviewCropped(
+                            _cameraController2,
+                            _isCameraInitialized2,
+                            '',
+                          ),
                         ),
-                      ),
-                    ),
+                      );
+                    }),
                     
                     // Template image in front (overlay)
                     Positioned.fill(
-                      child: Image.asset(
-                        'assets/images/template.png',
-                        fit: BoxFit.cover,
-                      ),
+                      child: Builder(builder: (context) {
+                        // Prefer template image from templates table; if absent, fallback to shape's imagePath
+                        String path = _templateData?.imagePath ?? '';
+                        if ((path.isEmpty || path == 'assets/images/template.png') && _templateShapes.isNotEmpty) {
+                          path = _templateShapes.first.imagePath;
+                        }
+                        if (path.isEmpty) {
+                          path = 'assets/images/template.png';
+                        }
+                        if (path.startsWith('assets/')) {
+                          return Image.asset(path, fit: BoxFit.cover);
+                        } else if (path.startsWith('data:image')) {
+                          try {
+                            final bytes = base64Decode(path.split(',').last);
+                            return Image.memory(bytes, fit: BoxFit.cover);
+                          } catch (e) {
+                            debugPrint('DualCameraPage: Error decoding base64 template image: $e');
+                            return Image.asset('assets/images/template.png', fit: BoxFit.cover);
+                          }
+                        } else if (File(path).existsSync()) {
+                          return Image.file(File(path), fit: BoxFit.cover);
+                        } else {
+                          return Image.asset('assets/images/template.png', fit: BoxFit.cover);
+                        }
+                      }),
                     ),
                   ],
                 ),

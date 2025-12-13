@@ -118,7 +118,7 @@ class _LandingPageState extends State<LandingPage> with TickerProviderStateMixin
   Widget _buildGradientBackground(Size size) {
     return Stack(
       children: [
-        // Base layer - PUTIH
+        // Base layer - putih solid agar bagian bawah tidak terlihat merah
         Container(
           width: size.width,
           height: size.height,
@@ -128,7 +128,7 @@ class _LandingPageState extends State<LandingPage> with TickerProviderStateMixin
         // Orange blob - KIRI ATAS (setengah keluar pinggir)
         Positioned(
           left: -size.width * 0.35, // Setengah ke kiri pinggir
-          top: -size.height * -0.2,  // Setengah ke atas pinggir
+          top: -size.height * 0.2,  // Setengah ke atas pinggir
           child: Container(
             width: size.width * 0.7,
             height: size.height * 0.8,
@@ -197,11 +197,13 @@ class _LandingPageState extends State<LandingPage> with TickerProviderStateMixin
           ),
         ),
         
-        // Blur effect
-        BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 60.0, sigmaY: 60.0),
-          child: Container(
-            color: Colors.transparent,
+        // Blur effect (dibatasi agar tidak bocor ke tepi layar web)
+        ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 60.0, sigmaY: 60.0),
+            child: Container(
+              color: Colors.transparent,
+            ),
           ),
         ),
       ],
@@ -292,22 +294,16 @@ class _LandingPageState extends State<LandingPage> with TickerProviderStateMixin
       animation: _floatingAnimation,
       builder: (context, child) {
         return Transform.translate(
-          offset: Offset(0, _floatingAnimation.value - 30),
+          // Geser sedikit ke kanan agar tampak lebih ke tengah layar
+          offset: Offset(50, _floatingAnimation.value - 30),
           child: Container(
             padding: const EdgeInsets.all(40),
             child: Center(
               child: Container(
-                width: 400,
-                height: 300,
+                width: 1000,
+                height: 875,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 30,
-                      offset: const Offset(0, 15),
-                    ),
-                  ],
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(20),
@@ -328,30 +324,30 @@ class _LandingPageState extends State<LandingPage> with TickerProviderStateMixin
                             ),
                             
                             // Overlay with camera info
-                            Positioned(
-                              bottom: 20,
-                              left: 20,
-                              right: 20,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.6),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: const Text(
-                                  'Kamera Depan',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
+                            // Positioned(
+                            //   bottom: 20,
+                            //   left: 20,
+                            //   right: 20,
+                            //   child: Container(
+                            //     padding: const EdgeInsets.symmetric(
+                            //       horizontal: 16,
+                            //       vertical: 8,
+                            //     ),
+                            //     decoration: BoxDecoration(
+                            //       color: Colors.black.withValues(alpha: 0.6),
+                            //       borderRadius: BorderRadius.circular(20),
+                            //     ),
+                            //     child: const Text(
+                            //       'Kamera Depan',
+                            //       style: TextStyle(
+                            //         color: Colors.white,
+                            //         fontSize: 16,
+                            //         fontWeight: FontWeight.w500,
+                            //       ),
+                            //       textAlign: TextAlign.center,
+                            //     ),
+                            //   ),
+                            // ),
                           ],
                         )
                       : Container(

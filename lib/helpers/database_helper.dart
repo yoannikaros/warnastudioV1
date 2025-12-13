@@ -21,6 +21,15 @@ class DatabaseHelper {
       const String templateName = 'default';
       const String imagePath = 'assets/images/template.png';
       
+      // Jika template default sudah ada, jangan menimpa data yang sudah diperbarui
+      try {
+        final existing = await ShapeDatabase.instance.getTemplate(templateName);
+        if (existing != null) {
+          developer.log('Default template already exists. Skipping insert to avoid overwriting updated image.', name: 'DatabaseHelper');
+          return true;
+        }
+      } catch (_) {}
+
       developer.log('Using asset image path: $imagePath', name: 'DatabaseHelper');
       
       // Buat template object
@@ -159,7 +168,7 @@ class DatabaseHelper {
   /// Cek apakah template default sudah ada
   static Future<bool> isDefaultTemplateExists() async {
     try {
-      final template = await ShapeDatabase.instance.getTemplate('conttt');
+      final template = await ShapeDatabase.instance.getTemplate('default');
       return template != null;
     } catch (e) {
       developer.log('ERROR checking default template: $e', name: 'DatabaseHelper');

@@ -110,8 +110,8 @@ class BluetoothPrinterService {
 
   /// Print image from widget
   Future<bool> printWidget(Widget widget, {
-    double width = 384, // 80mm printer width in pixels
-    double height = 600,
+    double width = 576, // 80mm printer width in pixels (ESC/POS mm80 ~576 dots)
+    double height = 800,
   }) async {
     bool connected = await isConnected;
     if (!connected) {
@@ -147,8 +147,8 @@ class BluetoothPrinterService {
         throw Exception('Failed to decode image');
       }
 
-      // Resize image to fit 80mm printer (384 pixels width)
-      img.Image resizedImage = img.copyResize(image, width: 384);
+      // Resize image to fit 80mm printer (approx 576 pixels width for ESC/POS mm80)
+      img.Image resizedImage = img.copyResize(image, width: 576);
 
       // Convert to grayscale for better printing
       img.Image grayscaleImage = img.grayscale(resizedImage);

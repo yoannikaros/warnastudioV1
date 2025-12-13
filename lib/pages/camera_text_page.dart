@@ -130,13 +130,13 @@ class _CameraTextPageState extends State<CameraTextPage> with WidgetsBindingObse
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/images/bg.png'),
-            fit: BoxFit.cover,
-            alignment: Alignment.center,
-          ),
-        ),
+        // decoration: const BoxDecoration(
+        //   image: DecorationImage(
+        //     image: AssetImage('assets/images/bg.png'),
+        //     fit: BoxFit.cover,
+        //     alignment: Alignment.center,
+        //   ),
+        // ),
         child: SafeArea(
           child: Stack(
             children: [
