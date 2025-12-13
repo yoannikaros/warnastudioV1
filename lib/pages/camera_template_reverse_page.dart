@@ -65,6 +65,14 @@ class CapturedImageWithTemplatePainter extends CustomPainter {
         capturedImage!.height.toDouble(),
       );
 
+      // Add greyscale color filter to paint
+      paint.colorFilter = const ColorFilter.matrix(<double>[
+        0.2126, 0.7152, 0.0722, 0, 0, // Red channel
+        0.2126, 0.7152, 0.0722, 0, 0, // Green channel
+        0.2126, 0.7152, 0.0722, 0, 0, // Blue channel
+        0, 0, 0, 1, 0, // Alpha channel
+      ]);
+
       canvas.drawImageRect(capturedImage!, srcRect, destRect, paint);
       canvas.restore();
     }
@@ -497,26 +505,27 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
         if (!mounted) return;
         await showDialog<void>(
           context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Izin Bluetooth diperlukan'),
-            content: const Text(
-              'Izin "Perangkat terdekat" (Nearby devices) tidak aktif.\n\n'
-              'Aktifkan izin Bluetooth dan Nearby devices di Pengaturan aplikasi untuk melanjutkan.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Batal'),
+          builder:
+              (context) => AlertDialog(
+                title: const Text('Izin Bluetooth diperlukan'),
+                content: const Text(
+                  'Izin "Perangkat terdekat" (Nearby devices) tidak aktif.\n\n'
+                  'Aktifkan izin Bluetooth dan Nearby devices di Pengaturan aplikasi untuk melanjutkan.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Batal'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      await openAppSettings();
+                      if (context.mounted) Navigator.of(context).pop();
+                    },
+                    child: const Text('Buka Pengaturan'),
+                  ),
+                ],
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  await openAppSettings();
-                  if (context.mounted) Navigator.of(context).pop();
-                },
-                child: const Text('Buka Pengaturan'),
-              ),
-            ],
-          ),
         );
         return;
       }
@@ -553,11 +562,12 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
       if (!mounted) return;
       selectedDevice ??= await showDialog<PrinterBluetoothInfo>(
         context: context,
-        builder: (context) => BluetoothPrinterDialog(
-          onDeviceSelected: (device) {
-            Navigator.of(context).pop(device);
-          },
-        ),
+        builder:
+            (context) => BluetoothPrinterDialog(
+              onDeviceSelected: (device) {
+                Navigator.of(context).pop(device);
+              },
+            ),
       );
 
       if (!mounted) return;
@@ -567,13 +577,14 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
         // PrintSuccessPage will handle the printing process
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
-            builder: (context) => PrintSuccessPage(
-              capturedImagePath: _lastCapturedImagePath,
-              originalImage: _originalImage,
-              capturedImage: _capturedImage,
-              shapes: widget.shapes,
-              printQuantity: _printQuantity,
-            ),
+            builder:
+                (context) => PrintSuccessPage(
+                  capturedImagePath: _lastCapturedImagePath,
+                  originalImage: _originalImage,
+                  capturedImage: _capturedImage,
+                  shapes: widget.shapes,
+                  printQuantity: _printQuantity,
+                ),
           ),
           (route) => false, // Remove all previous routes
         );
@@ -591,7 +602,7 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
       }
     }
   }
-  
+
   void _retakePhoto() {
     // Return to the existing DualCameraPage instance with retake signal
     Navigator.of(context).pop('retake');
@@ -607,13 +618,13 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    
+
     return Scaffold(
       body: Stack(
         children: [
           // Gradient Background with colorful blobs
           _buildGradientBackground(size),
-          
+
           // Main content
           SafeArea(
             child: Column(
@@ -645,16 +656,12 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
     return Stack(
       children: [
         // Base layer - PUTIH
-        Container(
-          width: size.width,
-          height: size.height,
-          color: Colors.white,
-        ),
-        
+        Container(width: size.width, height: size.height, color: Colors.white),
+
         // Orange blob - KIRI ATAS (setengah keluar pinggir)
         Positioned(
           left: -size.width * 0.35, // Setengah ke kiri pinggir
-          top: -size.height * 0.2,  // Setengah ke atas pinggir
+          top: -size.height * 0.2, // Setengah ke atas pinggir
           child: Container(
             width: size.width * 0.7,
             height: size.height * 0.8,
@@ -674,7 +681,7 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
             ),
           ),
         ),
-        
+
         // Green/Lime blob - top right (DI BELAKANG BIRU)
         Positioned(
           right: -size.width * 0.15,
@@ -698,7 +705,7 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
             ),
           ),
         ),
-        
+
         // Blue blob - center (DI DEPAN LIME) - BIRU TUA
         Positioned(
           left: size.width * 0.25,
@@ -722,14 +729,12 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
             ),
           ),
         ),
-        
+
         // Blur effect (dibatasi agar tidak bocor ke tepi layar web)
         ClipRect(
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 60.0, sigmaY: 60.0),
-            child: Container(
-              color: Colors.transparent,
-            ),
+            child: Container(color: Colors.transparent),
           ),
         ),
       ],
@@ -826,7 +831,6 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
           //     ),
           //   ],
           // ),
-      
         ],
       ),
     );
@@ -843,7 +847,8 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
             padding: const EdgeInsets.all(40),
             child: Center(
               child: Container(
-                width: 550 * (4 / 5), // Sesuaikan lebar dengan rasio template 4:5
+                width:
+                    550 * (4 / 5), // Sesuaikan lebar dengan rasio template 4:5
                 height: 550, // Diperbesar dari 300 ke 400
                 decoration: BoxDecoration(
                   color: Colors.white,
@@ -1162,14 +1167,44 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
                                         child: AspectRatio(
                                           aspectRatio:
                                               _controller!.value.aspectRatio,
-                                          child: Transform(
-                                            alignment: Alignment.center,
-                                            transform: Matrix4.diagonal3Values(
-                                              -1.0,
-                                              1.0,
-                                              1.0,
-                                            ), // Horizontal flip
-                                            child: CameraPreview(_controller!),
+                                          child: ColorFiltered(
+                                            colorFilter:
+                                                const ColorFilter.matrix(
+                                                  <double>[
+                                                    0.2126,
+                                                    0.7152,
+                                                    0.0722,
+                                                    0,
+                                                    0, // Red channel
+                                                    0.2126,
+                                                    0.7152,
+                                                    0.0722,
+                                                    0,
+                                                    0, // Green channel
+                                                    0.2126,
+                                                    0.7152,
+                                                    0.0722,
+                                                    0,
+                                                    0, // Blue channel
+                                                    0,
+                                                    0,
+                                                    0,
+                                                    1,
+                                                    0, // Alpha channel
+                                                  ],
+                                                ),
+                                            child: Transform(
+                                              alignment: Alignment.center,
+                                              transform:
+                                                  Matrix4.diagonal3Values(
+                                                    -1.0,
+                                                    1.0,
+                                                    1.0,
+                                                  ), // Horizontal flip
+                                              child: CameraPreview(
+                                                _controller!,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
