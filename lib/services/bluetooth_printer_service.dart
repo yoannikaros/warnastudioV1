@@ -153,6 +153,17 @@ class BluetoothPrinterService {
       // Convert to grayscale for better printing
       img.Image grayscaleImage = img.grayscale(resizedImage);
 
+      // Increase brightness and contrast for thermal printer
+      // Thermal printers tend to print darker, so we compensate
+      grayscaleImage = img.adjustColor(grayscaleImage, 
+        brightness: 1.3,   // Increase brightness by 30%
+        contrast: 1.2,     // Increase contrast by 20%
+      );
+
+      // Apply dithering for better quality on thermal printer
+      // This converts grayscale to black/white with Floyd-Steinberg dithering
+      grayscaleImage = img.ditherImage(grayscaleImage);
+
       // Create ESC/POS commands
       final profile = await CapabilityProfile.load();
       final generator = Generator(PaperSize.mm80, profile);
