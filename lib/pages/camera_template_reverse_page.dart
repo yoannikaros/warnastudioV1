@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -65,11 +66,12 @@ class CapturedImageWithTemplatePainter extends CustomPainter {
         capturedImage!.height.toDouble(),
       );
 
-      // Add greyscale color filter to paint
+      // Add greyscale color filter with brightness enhancement for better print quality
+      // The brightness offset (+50) ensures the greyscale image is clear and not too dark
       paint.colorFilter = const ColorFilter.matrix(<double>[
-        0.2126, 0.7152, 0.0722, 0, 0, // Red channel
-        0.2126, 0.7152, 0.0722, 0, 0, // Green channel
-        0.2126, 0.7152, 0.0722, 0, 0, // Blue channel
+        0.2126, 0.7152, 0.0722, 0, 50, // Red channel with brightness boost
+        0.2126, 0.7152, 0.0722, 0, 50, // Green channel with brightness boost
+        0.2126, 0.7152, 0.0722, 0, 50, // Blue channel with brightness boost
         0, 0, 0, 1, 0, // Alpha channel
       ]);
 
@@ -603,6 +605,188 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
     }
   }
 
+  Future<void> _showPdfPreview() async {
+    debugPrint('=== _showPdfPreview START ===');
+    debugPrint('_lastCapturedImagePath: $_lastCapturedImagePath');
+    debugPrint(
+      '_originalImage: ${_originalImage != null ? "${_originalImage!.width}x${_originalImage!.height}" : "null"}',
+    );
+    debugPrint(
+      '_capturedImage: ${_capturedImage != null ? "${_capturedImage!.width}x${_capturedImage!.height}" : "null"}',
+    );
+
+    if (_lastCapturedImagePath == null ||
+        _originalImage == null ||
+        _capturedImage == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tidak ada foto untuk preview.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Create composite image bytes
+      debugPrint('Creating composite image bytes...');
+      final compositeBytes = await _createCompositeImageBytes();
+      debugPrint(
+        'Composite bytes created: ${compositeBytes?.length ?? 0} bytes',
+      );
+
+      if (compositeBytes == null || compositeBytes.isEmpty) {
+        throw Exception(
+          'Gagal membuat gambar gabungan - bytes null atau kosong',
+        );
+      }
+
+      // Show PDF preview using BluetoothPrinterService
+      if (!mounted) return;
+      debugPrint(
+        'Calling showImagePreview with ${compositeBytes.length} bytes',
+      );
+      await _printerService.showImagePreview(context, compositeBytes);
+      debugPrint('=== _showPdfPreview END (SUCCESS) ===');
+    } catch (e, stackTrace) {
+      debugPrint('=== ERROR in _showPdfPreview ===');
+      debugPrint('Error: $e');
+      debugPrint('StackTrace: $stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal menampilkan preview: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<Uint8List?> _createCompositeImageBytes() async {
+    debugPrint('=== _createCompositeImageBytes START ===');
+    debugPrint(
+      '_originalImage: ${_originalImage != null ? "${_originalImage!.width}x${_originalImage!.height}" : "null"}',
+    );
+    debugPrint(
+      '_capturedImage: ${_capturedImage != null ? "${_capturedImage!.width}x${_capturedImage!.height}" : "null"}',
+    );
+    debugPrint('shapes: ${widget.shapes?.length ?? 0} shapes');
+
+    if (_originalImage == null || _capturedImage == null) {
+      debugPrint('ERROR: Missing images');
+      return null;
+    }
+
+    try {
+      // Create a picture recorder to draw the composite image
+      debugPrint('Creating PictureRecorder...');
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+
+      // Define the size for the composite image (use template size)
+      const size = Size(800, 1000); // Standard print size ratio 4:5
+      debugPrint('Canvas size: ${size.width}x${size.height}');
+
+      // Use the CapturedImageWithTemplatePainter to draw the composite
+      debugPrint('Creating painter...');
+      final painter = CapturedImageWithTemplatePainter(
+        templateImage: _originalImage!,
+        capturedImage: _capturedImage!,
+        shapes: widget.shapes,
+      );
+
+      debugPrint('Painting to canvas...');
+      painter.paint(canvas, size);
+
+      // Convert to image
+      debugPrint('Converting picture to image...');
+      final picture = recorder.endRecording();
+      final img = await picture.toImage(
+        size.width.toInt(),
+        size.height.toInt(),
+      );
+      debugPrint('Image created: ${img.width}x${img.height}');
+
+      // Convert to bytes
+      debugPrint('Converting to PNG bytes...');
+      final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+
+      if (byteData == null) {
+        debugPrint('ERROR: byteData is null!');
+        return null;
+      }
+
+      final bytes = byteData.buffer.asUint8List();
+      debugPrint('PNG bytes created: ${bytes.length} bytes');
+      debugPrint('=== _createCompositeImageBytes END (SUCCESS) ===');
+      return bytes;
+    } catch (e, stackTrace) {
+      debugPrint('=== ERROR in _createCompositeImageBytes ===');
+      debugPrint('Error: $e');
+      debugPrint('StackTrace: $stackTrace');
+      return null;
+    }
+  }
+
+  Future<void> _downloadPdf() async {
+    debugPrint('=== _downloadPdf START ===');
+
+    if (_lastCapturedImagePath == null ||
+        _originalImage == null ||
+        _capturedImage == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tidak ada foto untuk didownload.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Create composite image bytes
+      debugPrint('Creating composite image bytes for PDF...');
+      final compositeBytes = await _createCompositeImageBytes();
+
+      if (compositeBytes == null || compositeBytes.isEmpty) {
+        throw Exception('Gagal membuat gambar gabungan');
+      }
+
+      debugPrint('Composite bytes created: ${compositeBytes.length} bytes');
+
+      // Generate and save PDF
+      if (!mounted) return;
+      final success = await _printerService.generateAndSavePdf(
+        context,
+        compositeBytes,
+        defaultFileName:
+            'warna_studio_${DateTime.now().millisecondsSinceEpoch}',
+      );
+
+      if (success) {
+        debugPrint('PDF downloaded successfully');
+      } else {
+        debugPrint('PDF download cancelled or failed');
+      }
+
+      debugPrint('=== _downloadPdf END ===');
+    } catch (e, stackTrace) {
+      debugPrint('=== ERROR in _downloadPdf ===');
+      debugPrint('Error: $e');
+      debugPrint('StackTrace: $stackTrace');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal mendownload PDF: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   void _retakePhoto() {
     // Return to the existing DualCameraPage instance with retake signal
     Navigator.of(context).pop('retake');
@@ -618,6 +802,7 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
+    final isMobile = size.width < 800; // Mobile breakpoint
 
     return Scaffold(
       body: Stack(
@@ -630,19 +815,12 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
             child: Column(
               children: [
                 // Top Navigation Bar
-                _buildTopNavigation(),
+                _buildTopNavigation(isMobile),
 
-                // Main Content
+                // Main Content - Responsive layout
                 Expanded(
-                  child: Row(
-                    children: [
-                      // // Left side - Template Display
-                      Expanded(flex: 1, child: _buildTemplateSection()),
-
-                      // Right side - Controls
-                      Expanded(flex: 1, child: _buildControlsSection()),
-                    ],
-                  ),
+                  child:
+                      isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
                 ),
               ],
             ),
@@ -741,96 +919,53 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
     );
   }
 
-  Widget _buildTopNavigation() {
+  Widget _buildTopNavigation(bool isMobile) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-      decoration: BoxDecoration(
-        color: Colors.transparent,
-        // boxShadow: [
-        //   BoxShadow(
-        //     color: Colors.t,
-        //     blurRadius: 10,
-        //     offset: const Offset(0, 2),
-        //   ),
-        // ],
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 16 : 40,
+        vertical: isMobile ? 12 : 20,
       ),
+      decoration: BoxDecoration(color: Colors.transparent),
       child: Row(
         children: [
           // Logo
-          Row(children: [Image.asset('assets/images/logo.png', width: 100)]),
+          Image.asset('assets/images/logo.png', width: isMobile ? 60 : 100),
 
           const Spacer(),
 
-          // Manage button (top-right)
-          TextButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const ManualSegmentationPage(),
-                ),
-              );
-            },
-            child: const Text('Manage'),
-          ),
+          // Preview button (top-right)
+          if (!isMobile)
+            TextButton(
+              onPressed:
+                  _lastCapturedImagePath != null ? _showPdfPreview : null,
+              child: const Text('Preview'),
+            ),
+        ],
+      ),
+    );
+  }
 
-          // Navigation Menu
-          // Row(
-          //   children: [
-          //     GestureDetector(
-          //       onTap: () {
-          //         Navigator.push(
-          //           context,
-          //           MaterialPageRoute(
-          //             builder: (context) => const LandingPage(),
-          //           ),
-          //         );
-          //       },
-          //       child: _buildNavItem('Beranda', false),
-          //     ),
-          //     const SizedBox(width: 30),
-          //     GestureDetector(
-          //       onTap: () {
-          //         Navigator.push(
-          //           context,
-          //           MaterialPageRoute(
-          //             builder: (context) => const DualCameraPage(),
-          //           ),
-          //         );
-          //       },
-          //       child: _buildNavItem('Dual Camera', false),
-          //     ),
-          //     const SizedBox(width: 30),
-          //     _buildNavItem('Fitur', false),
-          //     const SizedBox(width: 30),
-          //     _buildNavItem('Blog', false),
-          //     const SizedBox(width: 40),
-          //     Container(
-          //       padding: const EdgeInsets.symmetric(
-          //         horizontal: 20,
-          //         vertical: 10,
-          //       ),
-          //       decoration: BoxDecoration(
-          //         color: const Color(0xFFDC143C), // Red
-          //         borderRadius: BorderRadius.circular(25),
-          //         boxShadow: [
-          //           BoxShadow(
-          //             color: const Color(0xFFDC143C).withValues(alpha: 0.3),
-          //             blurRadius: 8,
-          //             offset: const Offset(0, 4),
-          //           ),
-          //         ],
-          //       ),
-          //       child: const Text(
-          //         'Mulai',
-          //         style: TextStyle(
-          //           color: Colors.white,
-          //           fontWeight: FontWeight.w600,
-          //         ),
-          //       ),
-          //     ),
-          //   ],
-          // ),
+  Widget _buildDesktopLayout() {
+    return Row(
+      children: [
+        // Left side - Template Display
+        Expanded(flex: 1, child: _buildTemplateSection()),
+
+        // Right side - Controls
+        Expanded(flex: 1, child: _buildControlsSection()),
+      ],
+    );
+  }
+
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          // Template Display
+          _buildTemplateSectionMobile(),
+
+          // Controls
+          _buildControlsSectionMobile(),
         ],
       ),
     );
@@ -896,6 +1031,38 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildTemplateSectionMobile() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Container(
+        width: double.infinity,
+        height: 400,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: _buildTemplateDisplay(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlsSectionMobile() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      child: _buildControlsPanel(),
     );
   }
 
@@ -1072,6 +1239,84 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
 
               const SizedBox(height: 10),
 
+              // Preview PDF Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed:
+                      _lastCapturedImagePath != null ? _showPdfPreview : null,
+                  icon: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4CAF50),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.picture_as_pdf,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                  label: const Text('Preview PDF'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: const Color(0xFF4CAF50),
+                    disabledBackgroundColor: Colors.grey[300],
+                    disabledForegroundColor: Colors.grey[600],
+                    elevation: 3,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 20,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      side: const BorderSide(color: Color(0xFF4CAF50)),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // Download PDF Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed:
+                      _lastCapturedImagePath != null ? _downloadPdf : null,
+                  icon: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2196F3),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.download,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                  label: const Text('Download PDF'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: const Color(0xFF2196F3),
+                    disabledBackgroundColor: Colors.grey[300],
+                    disabledForegroundColor: Colors.grey[600],
+                    elevation: 3,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 20,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      side: const BorderSide(color: Color(0xFF2196F3)),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
               // Retake Button
               SizedBox(
                 width: double.infinity,
@@ -1168,31 +1413,30 @@ class _CameraTemplateReversePageState extends State<CameraTemplateReversePage>
                                           aspectRatio:
                                               _controller!.value.aspectRatio,
                                           child: ColorFiltered(
-                                            colorFilter:
-                                                const ColorFilter.matrix(
-                                                  <double>[
-                                                    0.2126,
-                                                    0.7152,
-                                                    0.0722,
-                                                    0,
-                                                    0, // Red channel
-                                                    0.2126,
-                                                    0.7152,
-                                                    0.0722,
-                                                    0,
-                                                    0, // Green channel
-                                                    0.2126,
-                                                    0.7152,
-                                                    0.0722,
-                                                    0,
-                                                    0, // Blue channel
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    1,
-                                                    0, // Alpha channel
-                                                  ],
-                                                ),
+                                            colorFilter: const ColorFilter.matrix(<
+                                              double
+                                            >[
+                                              0.2126,
+                                              0.7152,
+                                              0.0722,
+                                              0,
+                                              50, // Red channel with brightness boost
+                                              0.2126,
+                                              0.7152,
+                                              0.0722,
+                                              0,
+                                              50, // Green channel with brightness boost
+                                              0.2126,
+                                              0.7152,
+                                              0.0722,
+                                              0,
+                                              50, // Blue channel with brightness boost
+                                              0,
+                                              0,
+                                              0,
+                                              1,
+                                              0, // Alpha channel
+                                            ]),
                                             child: Transform(
                                               alignment: Alignment.center,
                                               transform:
